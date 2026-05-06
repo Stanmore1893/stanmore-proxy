@@ -1,0 +1,88 @@
+// ═══════════════════════════════════════════════════════════
+// Stanmore Golf Club — JSONBin Proxy (Vercel Serverless)
+// ═══════════════════════════════════════════════════════════
+
+const BIN_ID  = process.env.JSONBIN_BIN_ID;
+const API_KEY = process.env.JSONBIN_API_KEY;
+const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+
+const ALLOWED_ORIGINS = [
+  'https://stanmore1893.github.io',
+  'http://localhost',
+  'http://127.0.0.1',
+];
+
+function getCorsHeaders(origin) {
+  const allowed = ALLOWED_ORIGINS.some(o => origin && origin.startsWith(o));
+  return {
+    'Access-Control-Allow-Origin':  allowed ? origin : ALLOWED_ORIGINS[0],
+    'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age':       '86400',
+  };
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => {
+      try { resolve(JSON.parse(data)); }
+      catch(e) { reject(new Error('Invalid JSON')); }
+    });
+    req.on('error', reject);
+  });
+}
+
+export default async function handler(req, res) {
+  const origin = req.headers['origin'] || '';
+  const cors   = getCorsHeaders(origin);
+
+  // Apply CORS headers to every response
+  Object.entries(cors).forEach(([k, v]) => res.setHeader(k, v));
+
+  // Preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  // Validate method
+  if (!['GET', 'PUT'].includes(req.method)) {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Validate env vars are set
+  if (!BIN_ID || !API_KEY) {
+    return res.status(500).json({ error: 'Server misconfigured — check environment variables' });
+  }
+
+  try {
+    if (req.method === 'GET') {
+      const r = await fetch(`${JSONBIN_URL}/latest`, {
+        headers: { 'X-Master-Key': API_KEY, 'X-Bin-Meta': 'false' }
+      });
+      const data = await r.json();
+      return res.status(r.status).json(data);
+    }
+
+    if (req.method === 'PUT') {
+      let body;
+      try {
+        body = await readBody(req);
+      } catch(e) {
+        return res.status(400).json({ error: 'Invalid JSON body' });
+      }
+
+      const r = await fetch(JSONBIN_URL, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
+        body:    JSON.stringify(body),
+      });
+      const data = await r.json();
+      return res.status(r.status).json(data);
+    }
+
+  } catch(e) {
+    return res.status(500).json({ error: 'Proxy error', message: e.message });
+  }
+}
