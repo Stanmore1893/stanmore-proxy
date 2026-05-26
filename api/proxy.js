@@ -1,10 +1,9 @@
 // Stanmore Golf Club — Supabase Proxy (Vercel)
-// Replaces JSONBin with Supabase for faster, more reliable storage
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || '').replace(/\s+/g, '');
 const TABLE        = 'club_data';
-const ROW_ID       = 1; // single row stores all data
+const ROW_ID       = 1;
 
 function getCorsHeaders() {
   return {
@@ -64,7 +63,6 @@ export default async function handler(req, res) {
       try { body = await readBody(req); }
       catch(e) { return res.status(400).json({ error: 'Invalid JSON body' }); }
 
-      // Upsert — insert or update row with id=1
       const r = await fetch(
         `${SUPABASE_URL}/rest/v1/${TABLE}`,
         {
