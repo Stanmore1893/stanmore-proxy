@@ -25,35 +25,41 @@ function readBody(req) {
   });
 }
 
-// Fetch with a hard timeout so Vercel never hits its limit
-function fetchWithTimeout(url, options, ms = 7000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+async function fetchJSONBin(url, options) {
+  // Try up to 2 times with a generous timeout
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8500);
+    try {
+      const r = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return r;
+    } catch(e) {
+      clearTimeout(timer);
+      if (attempt === 2) throw e;
+      // Brief pause before retry
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
 }
 
 export default async function handler(req, res) {
   const cors = getCorsHeaders();
   Object.entries(cors).forEach(([k, v]) => res.setHeader(k, v));
 
-  // Preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
 
   if (!['GET', 'PUT'].includes(req.method)) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   if (!BIN_ID || !API_KEY) {
-    return res.status(500).json({ error: 'Server misconfigured — check environment variables' });
+    return res.status(500).json({ error: 'Missing environment variables' });
   }
 
   try {
     if (req.method === 'GET') {
-      const r = await fetchWithTimeout(`${JSONBIN_URL}/latest`, {
-        method: 'GET',
+      const r = await fetchJSONBin(`${JSONBIN_URL}/latest`, {
         headers: { 'X-Master-Key': API_KEY, 'X-Bin-Meta': 'false' }
       });
       const data = await r.json();
@@ -65,7 +71,7 @@ export default async function handler(req, res) {
       try { body = await readBody(req); }
       catch(e) { return res.status(400).json({ error: 'Invalid JSON body' }); }
 
-      const r = await fetchWithTimeout(JSONBIN_URL, {
+      const r = await fetchJSONBin(JSONBIN_URL, {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Master-Key': API_KEY },
         body:    JSON.stringify(body),
@@ -75,7 +81,7 @@ export default async function handler(req, res) {
     }
 
   } catch(e) {
-    const msg = e.name === 'AbortError' ? 'Request timed out' : e.message;
+    const msg = e.name === 'AbortError' ? 'JSONBin timeout — try again' : e.message;
     return res.status(504).json({ error: 'Proxy error', message: msg });
   }
 }
